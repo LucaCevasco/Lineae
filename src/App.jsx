@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, Plus, RotateCcw, RotateCw, Save, Trash2, Upload } from "lucide-react";
+import { Bot, Code, Copy, Download, FileCode, Loader2, MessageSquare, Plus, RotateCcw, RotateCw, Save, Send, Trash2, Upload, X } from "lucide-react";
+import { diagramToJavaCode, javaCodeToDiagram, chatAboutDiagram, isApiKeyConfigured } from "./openai.js";
 
 const RELATIONSHIP_TYPES = [
   "association",
@@ -760,11 +761,170 @@ function RelationshipEditor({ classNames, selectedName, items, onChange }) {
   );
 }
 
+function JavaExportModal({ code, loading, error, onClose, onCopy }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+      <div className="mx-4 w-full max-w-3xl rounded-3xl bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+          <h2 className="text-lg font-bold text-slate-900">Export to Java</h2>
+          <button type="button" onClick={onClose} className="rounded-xl p-2 text-slate-500 hover:bg-slate-100">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="max-h-[60vh] overflow-auto px-6 py-4">
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-slate-400" />
+              <span className="ml-3 text-slate-500">Generating Java code...</span>
+            </div>
+          ) : error ? (
+            <div className="rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+          ) : (
+            <pre className="overflow-auto rounded-2xl bg-slate-900 p-4 text-sm text-slate-100 whitespace-pre-wrap">{code}</pre>
+          )}
+        </div>
+        {code && !loading ? (
+          <div className="flex justify-end border-t border-slate-200 px-6 py-4">
+            <button type="button" onClick={() => onCopy(code)} className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">
+              <Copy className="h-4 w-4" />
+              Copy code
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function JavaImportModal({ code, onCodeChange, loading, error, onClose, onImport }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+      <div className="mx-4 w-full max-w-3xl rounded-3xl bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+          <h2 className="text-lg font-bold text-slate-900">Import from Java</h2>
+          <button type="button" onClick={onClose} className="rounded-xl p-2 text-slate-500 hover:bg-slate-100">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="px-6 py-4">
+          {error ? (
+            <div className="mb-4 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+          ) : null}
+          <textarea
+            value={code}
+            onChange={(e) => onCodeChange(e.target.value)}
+            placeholder="Paste your Java code here..."
+            rows={16}
+            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 font-mono text-sm"
+          />
+        </div>
+        <div className="flex justify-end border-t border-slate-200 px-6 py-4">
+          <button
+            type="button"
+            onClick={onImport}
+            disabled={loading || !code.trim()}
+            className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileCode className="h-4 w-4" />}
+            Import to Diagram
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChatPanel({ messages, input, onInputChange, loading, error, onSend, onClose, chatEndRef }) {
+  return (
+    <div className="fixed right-8 bottom-8 z-40 flex h-[600px] w-[400px] flex-col rounded-3xl bg-white shadow-xl border border-slate-200">
+      <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+        <div className="flex items-center gap-2">
+          <Bot className="h-5 w-5 text-slate-600" />
+          <span className="text-sm font-bold text-slate-900">AI Assistant</span>
+        </div>
+        <button type="button" onClick={onClose} className="rounded-xl p-1.5 text-slate-500 hover:bg-slate-100">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="flex-1 overflow-auto px-4 py-3 space-y-3">
+        {messages.length === 0 ? (
+          <div className="flex h-full items-center justify-center text-center text-sm text-slate-400">
+            Ask me to modify your diagram, suggest design patterns, or answer UML questions.
+          </div>
+        ) : (
+          messages.map((msg, i) => (
+            <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div
+                className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm whitespace-pre-wrap ${
+                  msg.role === "user"
+                    ? "bg-slate-800 text-white"
+                    : "bg-slate-100 text-slate-800"
+                }`}
+              >
+                {msg.content}
+              </div>
+            </div>
+          ))
+        )}
+        {error ? (
+          <div className="rounded-2xl bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>
+        ) : null}
+        <div ref={chatEndRef} />
+      </div>
+      <div className="border-t border-slate-200 px-4 py-3">
+        <div className="flex gap-2">
+          <input
+            value={input}
+            onChange={(e) => onInputChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                onSend();
+              }
+            }}
+            placeholder="Ask about your diagram..."
+            className="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+            disabled={loading}
+          />
+          <button
+            type="button"
+            onClick={onSend}
+            disabled={loading || !input.trim()}
+            className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-3 py-2 text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const { state, setState, undo, redo, canUndo, canRedo } = useHistoryState(INITIAL_STATE);
   const [dragging, setDragging] = useState(null);
   const svgRef = useRef(null);
   const fileInputRef = useRef(null);
+
+  // Java export modal
+  const [showJavaExport, setShowJavaExport] = useState(false);
+  const [javaExportCode, setJavaExportCode] = useState("");
+  const [javaExportLoading, setJavaExportLoading] = useState(false);
+  const [javaExportError, setJavaExportError] = useState(null);
+
+  // Java import modal
+  const [showJavaImport, setShowJavaImport] = useState(false);
+  const [javaImportCode, setJavaImportCode] = useState("");
+  const [javaImportLoading, setJavaImportLoading] = useState(false);
+  const [javaImportError, setJavaImportError] = useState(null);
+
+  // Chat panel
+  const [showChat, setShowChat] = useState(false);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatError, setChatError] = useState(null);
+  const chatEndRef = useRef(null);
 
   const { selected, classes, layout } = state;
   const classNames = Object.keys(classes);
@@ -1023,6 +1183,107 @@ export default function App() {
     link.click();
   };
 
+  const handleExportJava = async () => {
+    if (!isApiKeyConfigured()) {
+      setJavaExportError("OpenAI API key not configured. Add VITE_OPENAI_API_KEY to your .env file.");
+      setShowJavaExport(true);
+      return;
+    }
+    setShowJavaExport(true);
+    setJavaExportCode("");
+    setJavaExportError(null);
+    setJavaExportLoading(true);
+    try {
+      const code = await diagramToJavaCode(classes);
+      setJavaExportCode(code);
+    } catch (err) {
+      setJavaExportError(err.message || "Failed to generate Java code.");
+    } finally {
+      setJavaExportLoading(false);
+    }
+  };
+
+  const handleImportJava = async () => {
+    if (!isApiKeyConfigured()) {
+      setJavaImportError("OpenAI API key not configured. Add VITE_OPENAI_API_KEY to your .env file.");
+      return;
+    }
+    if (!javaImportCode.trim()) return;
+    setJavaImportError(null);
+    setJavaImportLoading(true);
+    try {
+      const result = await javaCodeToDiagram(javaImportCode);
+      setState((current) => ({
+        ...current,
+        selected: Object.keys(result.classes)[0] ?? current.selected,
+        classes: result.classes,
+        layout: result.layout,
+      }));
+      setShowJavaImport(false);
+      setJavaImportCode("");
+    } catch (err) {
+      setJavaImportError(err.message || "Failed to parse Java code.");
+    } finally {
+      setJavaImportLoading(false);
+    }
+  };
+
+  const handleChatSend = async () => {
+    if (!chatInput.trim() || chatLoading) return;
+    if (!isApiKeyConfigured()) {
+      setChatError("OpenAI API key not configured. Add VITE_OPENAI_API_KEY to your .env file.");
+      return;
+    }
+    const userMessage = { role: "user", content: chatInput.trim() };
+    const assistantMessage = { role: "assistant", content: "" };
+    const nextMessages = [...chatMessages, userMessage, assistantMessage];
+    setChatMessages(nextMessages);
+    setChatInput("");
+    setChatError(null);
+    setChatLoading(true);
+
+    try {
+      const apiMessages = [...chatMessages, userMessage].map((m) => ({ role: m.role, content: m.content }));
+      const generator = chatAboutDiagram(apiMessages, { classes, layout });
+      for await (const chunk of generator) {
+        if (chunk.type === "delta") {
+          setChatMessages((prev) => {
+            const updated = [...prev];
+            const last = updated[updated.length - 1];
+            updated[updated.length - 1] = { ...last, content: last.content + chunk.text };
+            return updated;
+          });
+        } else if (chunk.type === "result") {
+          setChatMessages((prev) => {
+            const updated = [...prev];
+            updated[updated.length - 1] = { role: "assistant", content: chunk.text };
+            return updated;
+          });
+          if (chunk.diagramUpdate) {
+            setState((current) => ({
+              ...current,
+              selected: Object.keys(chunk.diagramUpdate.classes)[0] ?? current.selected,
+              classes: chunk.diagramUpdate.classes,
+              layout: chunk.diagramUpdate.layout,
+            }));
+          }
+        }
+      }
+    } catch (err) {
+      setChatError(err.message || "Chat request failed.");
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
+  const copyToClipboard = (text) => {
+    navigator.clipboard.writeText(text);
+  };
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages]);
+
   const getSvgPoint = (clientX, clientY) => {
     const svg = svgRef.current;
     if (!svg) {
@@ -1088,6 +1349,11 @@ export default function App() {
             <ToolbarButton icon={Download} onClick={exportSvg}>Export SVG</ToolbarButton>
             <ToolbarButton icon={Download} onClick={exportPng}>Export PNG</ToolbarButton>
             <ToolbarButton icon={RotateCw} onClick={autoLayout}>Auto layout</ToolbarButton>
+            <ToolbarButton icon={Code} onClick={handleExportJava}>Export Java</ToolbarButton>
+            <ToolbarButton icon={FileCode} onClick={() => setShowJavaImport(true)}>Import Java</ToolbarButton>
+            <ToolbarButton icon={MessageSquare} onClick={() => setShowChat((s) => !s)}>
+              {showChat ? "Close Chat" : "AI Chat"}
+            </ToolbarButton>
             <input ref={fileInputRef} type="file" accept="application/json" onChange={loadJson} className="hidden" />
           </div>
         </div>
@@ -1198,6 +1464,37 @@ export default function App() {
           </div>
         </div>
       </div>
+      {showJavaExport ? (
+        <JavaExportModal
+          code={javaExportCode}
+          loading={javaExportLoading}
+          error={javaExportError}
+          onClose={() => setShowJavaExport(false)}
+          onCopy={copyToClipboard}
+        />
+      ) : null}
+      {showJavaImport ? (
+        <JavaImportModal
+          code={javaImportCode}
+          onCodeChange={setJavaImportCode}
+          loading={javaImportLoading}
+          error={javaImportError}
+          onClose={() => { setShowJavaImport(false); setJavaImportError(null); }}
+          onImport={handleImportJava}
+        />
+      ) : null}
+      {showChat ? (
+        <ChatPanel
+          messages={chatMessages}
+          input={chatInput}
+          onInputChange={setChatInput}
+          loading={chatLoading}
+          error={chatError}
+          onSend={handleChatSend}
+          onClose={() => setShowChat(false)}
+          chatEndRef={chatEndRef}
+        />
+      ) : null}
     </div>
   );
 }
