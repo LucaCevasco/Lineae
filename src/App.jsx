@@ -1335,10 +1335,35 @@ export default function App() {
       <div className="mx-auto max-w-[1500px]">
         <div className="mb-6 flex flex-col gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-slate-900">Interactive UML Diagram Editor</h1>
-            <p className="mt-2 max-w-4xl text-slate-600">
-              This editor now supports structured UML members, interfaces and abstract classes, multiplicities and role labels, draggable auto-resizing cards, JSON save/load, SVG and PNG export, undo/redo, snap-to-grid, and auto-layout.
-            </p>
+            <svg width="320" height="80" viewBox="0 0 960 240" fill="none" xmlns="http://www.w3.org/2000/svg" className="mb-1">
+              <defs>
+                <linearGradient id="bannerGradient" x1="40" y1="40" x2="220" y2="200" gradientUnits="userSpaceOnUse">
+                  <stop stopColor="#0F172A"/>
+                  <stop offset="1" stopColor="#334155"/>
+                </linearGradient>
+                <linearGradient id="bannerAccent" x1="100" y1="60" x2="180" y2="160" gradientUnits="userSpaceOnUse">
+                  <stop stopColor="#38BDF8"/>
+                  <stop offset="1" stopColor="#6366F1"/>
+                </linearGradient>
+              </defs>
+              <g transform="translate(40 40)">
+                <rect x="0" y="0" width="180" height="160" rx="28" fill="url(#bannerGradient)"/>
+                <path d="M42 46H92M42 80H138M42 114H76" stroke="#E2E8F0" strokeWidth="10" strokeLinecap="round"/>
+                <path d="M92 46H124V80H138M76 114H124V80" stroke="url(#bannerAccent)" strokeWidth="8" strokeLinecap="round" strokeLinejoin="round"/>
+                <circle cx="92" cy="46" r="10" fill="#38BDF8"/>
+                <circle cx="138" cy="80" r="10" fill="#6366F1"/>
+                <circle cx="76" cy="114" r="10" fill="#22C55E"/>
+                <circle cx="124" cy="80" r="8" fill="#F8FAFC"/>
+                <rect x="24" y="24" width="132" height="112" rx="18" stroke="rgba(255,255,255,0.12)" strokeWidth="2"/>
+              </g>
+              <g transform="translate(260 62)">
+                <text x="0" y="58" fill="#0F172A" fontFamily="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" fontSize="72" fontWeight="800" letterSpacing="6">LINEAE</text>
+                <text x="2" y="104" fill="#475569" fontFamily="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" fontSize="24" fontWeight="500" letterSpacing="1.5">UML diagram editor</text>
+                <path d="M4 128H278" stroke="#CBD5E1" strokeWidth="4" strokeLinecap="round"/>
+                <circle cx="4" cy="128" r="6" fill="#38BDF8"/>
+                <circle cx="278" cy="128" r="6" fill="#6366F1"/>
+              </g>
+            </svg>
           </div>
           <div className="flex flex-wrap gap-2">
             <ToolbarButton icon={Plus} onClick={addClass}>Add class</ToolbarButton>

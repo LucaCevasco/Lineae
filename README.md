@@ -1,6 +1,6 @@
-# Lineae
-
-Lightweight, AI-powered open-source UML drafting tool.
+<p align="center">
+  <img src="assets/banner.svg" alt="Lineae — UML diagram editor" width="960" />
+</p>
 
 ## What is Lineae?
 
