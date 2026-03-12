@@ -77,106 +77,29 @@ function validateRelations(diagramData) {
   return diagramData;
 }
 
-const diagramJsonSchema = {
-  name: "diagram",
-  strict: true,
-  schema: {
-    type: "object",
-    properties: {
-      classes: {
-        type: "object",
-        additionalProperties: {
-          type: "object",
-          properties: {
-            name: { type: "string" },
-            stereotype: { type: "string", enum: ["none", "entity", "interface", "abstract", "service", "controller", "repository"] },
-            isAbstract: { type: "boolean" },
-            description: { type: "string" },
-            attributes: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  id: { type: "string" },
-                  visibility: { type: "string", enum: ["+", "-", "#", "~"] },
-                  name: { type: "string" },
-                  type: { type: "string" },
-                  defaultValue: { type: "string" },
-                  isStatic: { type: "boolean" },
-                  isAbstract: { type: "boolean" },
-                },
-                required: ["id", "visibility", "name", "type", "defaultValue", "isStatic", "isAbstract"],
-                additionalProperties: false,
-              },
-            },
-            methods: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  id: { type: "string" },
-                  visibility: { type: "string", enum: ["+", "-", "#", "~"] },
-                  name: { type: "string" },
-                  returnType: { type: "string" },
-                  parameters: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: {
-                        id: { type: "string" },
-                        name: { type: "string" },
-                        type: { type: "string" },
-                      },
-                      required: ["id", "name", "type"],
-                      additionalProperties: false,
-                    },
-                  },
-                  isStatic: { type: "boolean" },
-                  isAbstract: { type: "boolean" },
-                },
-                required: ["id", "visibility", "name", "returnType", "parameters", "isStatic", "isAbstract"],
-                additionalProperties: false,
-              },
-            },
-            relations: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  id: { type: "string" },
-                  type: { type: "string", enum: ["association", "aggregation", "composition", "inheritance", "implementation", "dependency"] },
-                  target: { type: "string" },
-                  sourceMultiplicity: { type: "string" },
-                  targetMultiplicity: { type: "string" },
-                  sourceRole: { type: "string" },
-                  targetRole: { type: "string" },
-                },
-                required: ["id", "type", "target", "sourceMultiplicity", "targetMultiplicity", "sourceRole", "targetRole"],
-                additionalProperties: false,
-              },
-            },
-          },
-          required: ["name", "stereotype", "isAbstract", "description", "attributes", "methods", "relations"],
-          additionalProperties: false,
-        },
-      },
-      layout: {
-        type: "object",
-        additionalProperties: {
-          type: "object",
-          properties: {
-            x: { type: "number" },
-            y: { type: "number" },
-          },
-          required: ["x", "y"],
-          additionalProperties: false,
-        },
-      },
-    },
-    required: ["classes", "layout"],
-    additionalProperties: false,
+const DIAGRAM_JSON_FORMAT = `Respond with ONLY a JSON object with this exact structure (no markdown, no extra text):
+{
+  "classes": {
+    "<ClassName>": {
+      "name": "<ClassName>",
+      "stereotype": "none"|"entity"|"interface"|"abstract"|"service"|"controller"|"repository",
+      "isAbstract": false,
+      "description": "...",
+      "attributes": [
+        { "id": "placeholder", "visibility": "+"|"-"|"#"|"~", "name": "...", "type": "...", "defaultValue": "", "isStatic": false, "isAbstract": false }
+      ],
+      "methods": [
+        { "id": "placeholder", "visibility": "+", "name": "...", "returnType": "void", "parameters": [{ "id": "placeholder", "name": "...", "type": "..." }], "isStatic": false, "isAbstract": false }
+      ],
+      "relations": [
+        { "id": "placeholder", "type": "association"|"aggregation"|"composition"|"inheritance"|"implementation"|"dependency", "target": "<OtherClassName>", "sourceMultiplicity": "1", "targetMultiplicity": "1", "sourceRole": "", "targetRole": "" }
+      ]
+    }
   },
-};
+  "layout": {
+    "<ClassName>": { "x": 40, "y": 60 }
+  }
+}`;
 
 export async function diagramToJavaCode(classes) {
   const serialized = serializeClassesForPrompt(classes);
@@ -225,17 +148,16 @@ Rules:
 - Set defaultValue to empty string "" if no default
 - Generate placeholder UUIDs for all id fields (they will be replaced)
 - Layout: arrange classes in a 3-column grid, starting at x=40 y=60, with 340px horizontal spacing and 240px vertical spacing. All positions must be multiples of 20 (snap to grid).
-- The key for each class in the "classes" object must match the class "name" field exactly.`,
+- The key for each class in the "classes" object must match the class "name" field exactly.
+
+${DIAGRAM_JSON_FORMAT}`,
       },
       {
         role: "user",
         content: `Extract a UML diagram from this Java code:\n\n${code}`,
       },
     ],
-    response_format: {
-      type: "json_schema",
-      json_schema: diagramJsonSchema,
-    },
+    response_format: { type: "json_object" },
   });
   const data = JSON.parse(response.choices[0].message.content);
   return validateRelations(regenerateIds(data));
@@ -302,15 +224,14 @@ Rules:
 - Preserve existing classes/attributes/methods unless the user asked to change them
 - Generate placeholder UUIDs for all new id fields (they will be replaced)
 - Layout: keep existing positions for unchanged classes, place new classes in available grid positions (340px H, 240px V spacing from x=40 y=60, snap to 20)
-- The key for each class in "classes" must match its "name" field`,
+- The key for each class in "classes" must match its "name" field
+
+${DIAGRAM_JSON_FORMAT}`,
         },
         ...trimmedMessages,
         { role: "assistant", content: fullText },
       ],
-      response_format: {
-        type: "json_schema",
-        json_schema: diagramJsonSchema,
-      },
+      response_format: { type: "json_object" },
     });
 
     diagramUpdate = JSON.parse(updateResponse.choices[0].message.content);
