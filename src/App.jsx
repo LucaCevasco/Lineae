@@ -777,6 +777,20 @@ export default function App() {
     [classes]
   );
 
+  const canvasHeight = useMemo(() => {
+    const MIN_HEIGHT = 720;
+    const PADDING = 80;
+    let maxBottom = 0;
+    for (const name of classNames) {
+      const pos = layout[name];
+      if (pos) {
+        const bottom = pos.y + (classHeights[name] ?? 0);
+        if (bottom > maxBottom) maxBottom = bottom;
+      }
+    }
+    return Math.max(MIN_HEIGHT, maxBottom + PADDING);
+  }, [classNames, layout, classHeights]);
+
   useEffect(() => {
     window.localStorage.setItem("interactive-uml-editor-state", JSON.stringify(state));
   }, [state]);
@@ -995,7 +1009,7 @@ export default function App() {
 
     const canvas = document.createElement("canvas");
     canvas.width = 1280;
-    canvas.height = 720;
+    canvas.height = Math.round(1280 * (canvasHeight / 1080));
     const context = canvas.getContext("2d");
     context.fillStyle = "white";
     context.fillRect(0, 0, canvas.width, canvas.height);
@@ -1045,7 +1059,7 @@ export default function App() {
         ...current.layout,
         [dragging.name]: {
           x: Math.max(0, Math.min(snap(pointer.x - dragging.offsetX), 1080 - CARD_WIDTH)),
-          y: Math.max(0, Math.min(snap(pointer.y - dragging.offsetY), 680 - classHeights[dragging.name]))
+          y: Math.max(0, snap(pointer.y - dragging.offsetY))
         }
       }
     }));
@@ -1082,8 +1096,9 @@ export default function App() {
           <div className="rounded-3xl bg-white p-4 shadow-sm">
             <svg
               ref={svgRef}
-              viewBox="0 0 1080 720"
-              className="h-[720px] w-full touch-none rounded-2xl bg-[linear-gradient(to_right,#e2e8f0_1px,transparent_1px),linear-gradient(to_bottom,#e2e8f0_1px,transparent_1px)] bg-[size:20px_20px]"
+              viewBox={`0 0 1080 ${canvasHeight}`}
+              preserveAspectRatio="xMinYMin meet"
+              className="w-full touch-none rounded-2xl bg-[linear-gradient(to_right,#e2e8f0_1px,transparent_1px),linear-gradient(to_bottom,#e2e8f0_1px,transparent_1px)] bg-[size:20px_20px]"
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
               onPointerLeave={handlePointerUp}
