@@ -6,22 +6,37 @@
 
 Lineae is a browser-based UML editor built with React and Vite. It combines a clean drag-and-drop canvas with AI features — including natural-language chat for modifying diagrams and Java code export/import — to make UML drafting fast and fluid.
 
+## Demo
+
+### Class Diagram
+
+<p align="center">
+  <img src="assets/demo-class-diagram.png" alt="Lineae — Class Diagram Editor" width="960" />
+</p>
+
+### Sequence Diagram
+
+<p align="center">
+  <img src="assets/demo-sequence-diagram.png" alt="Lineae — Sequence Diagram Editor" width="960" />
+</p>
+
 ## Features
 
 - **Class diagrams** — create classes with attributes, methods, and stereotypes
+- **Sequence diagrams** — model interactions with participants, messages, and activation boxes
+- **Tabbed interface** — switch between class and sequence diagrams with full state preservation
 - **Drag & drop** — move and arrange elements freely on the canvas
 - **Relationships** — association, inheritance, composition, aggregation, and more
-- **AI chat** — describe changes in natural language and let AI modify your diagram
-- **Java export/import** — generate Java code from diagrams or import Java to generate diagrams
+- **AI chat** — describe changes in natural language and let AI modify either diagram type
+- **Java export/import** — generate Java code from class diagrams or import Java to generate diagrams
 - **SVG & PNG export** — export diagrams as images
 - **JSON save/load** — persist and restore your work
-- **Undo/redo** — full history support
+- **Undo/redo** — full history support across both diagram types
 - **Snap-to-grid** — align elements precisely
 - **Auto-layout** — automatically arrange diagram elements
 
 ## Roadmap
 
-- Sequence diagrams
 - Excalidraw-style freeform diagrams
 - Additional diagram types
 - Integrations (Linear, Slack)

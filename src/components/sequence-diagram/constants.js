@@ -1,0 +1,10 @@
+export const LIFELINE_SPACING = 200;
+export const HEAD_WIDTH = 120;
+export const HEAD_HEIGHT = 40;
+export const MESSAGE_SPACING = 50;
+export const CANVAS_PADDING_TOP = 80;
+export const CANVAS_PADDING_LEFT = 60;
+export const ACTIVATION_WIDTH = 16;
+export const SELF_MESSAGE_WIDTH = 40;
+export const PARTICIPANT_TYPES = ["participant", "actor", "boundary", "entity"];
+export const MESSAGE_TYPES = ["sync", "async", "return", "self"];

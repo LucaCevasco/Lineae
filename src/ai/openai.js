@@ -1,54 +1,11 @@
 import OpenAI from "openai";
+import { serializeClassesForPrompt, DIAGRAM_JSON_FORMAT } from "./classPrompts.js";
+import { serializeSequenceForPrompt, SEQUENCE_JSON_FORMAT } from "./sequencePrompts.js";
 
 const client = new OpenAI({
   apiKey: import.meta.env.VITE_OPENAI_API_KEY,
   dangerouslyAllowBrowser: true,
 });
-
-function serializeClassesForPrompt(classes) {
-  const lines = [];
-  for (const [name, cls] of Object.entries(classes)) {
-    const stereo = cls.stereotype && cls.stereotype !== "none" ? cls.stereotype : null;
-    lines.push(`Class: ${name}${stereo ? ` (stereotype: ${stereo}` : ""}${cls.isAbstract ? ", abstract: yes" : stereo ? ", abstract: no" : ""}${stereo ? ")" : ""}`);
-    if (cls.description) lines.push(`  Description: ${cls.description}`);
-    if (cls.attributes.length > 0) {
-      lines.push("  Attributes:");
-      for (const attr of cls.attributes) {
-        let line = `    ${attr.visibility}${attr.name}: ${attr.type}`;
-        if (attr.defaultValue) line += ` = ${attr.defaultValue}`;
-        if (attr.isStatic) line += " {static}";
-        if (attr.isAbstract) line += " {abstract}";
-        lines.push(line);
-      }
-    }
-    if (cls.methods.length > 0) {
-      lines.push("  Methods:");
-      for (const method of cls.methods) {
-        const params = method.parameters.map((p) => `${p.name}: ${p.type}`).join(", ");
-        let line = `    ${method.visibility}${method.name}(${params}): ${method.returnType}`;
-        if (method.isStatic) line += " {static}";
-        if (method.isAbstract) line += " {abstract}";
-        lines.push(line);
-      }
-    }
-    if (cls.relations.length > 0) {
-      lines.push("  Relationships:");
-      for (const rel of cls.relations) {
-        let line = `    ${rel.type} -> ${rel.target}`;
-        if (rel.sourceMultiplicity || rel.targetMultiplicity) {
-          line += ` [${rel.sourceMultiplicity || ""}..${rel.targetMultiplicity || ""}]`;
-        }
-        const roles = [];
-        if (rel.sourceRole) roles.push(`sourceRole: ${rel.sourceRole}`);
-        if (rel.targetRole) roles.push(`targetRole: ${rel.targetRole}`);
-        if (roles.length > 0) line += ` (${roles.join(", ")})`;
-        lines.push(line);
-      }
-    }
-    lines.push("");
-  }
-  return lines.join("\n");
-}
 
 function regenerateIds(diagramData) {
   const data = JSON.parse(JSON.stringify(diagramData));
@@ -69,6 +26,25 @@ function regenerateIds(diagramData) {
   return data;
 }
 
+function regenerateSequenceIds(data) {
+  const result = JSON.parse(JSON.stringify(data));
+  const idMap = {};
+
+  for (const p of result.participants) {
+    const newId = crypto.randomUUID();
+    idMap[p.id] = newId;
+    p.id = newId;
+  }
+
+  for (const m of result.messages) {
+    m.id = crypto.randomUUID();
+    if (idMap[m.from]) m.from = idMap[m.from];
+    if (idMap[m.to]) m.to = idMap[m.to];
+  }
+
+  return result;
+}
+
 function validateRelations(diagramData) {
   const classNames = Object.keys(diagramData.classes);
   for (const cls of Object.values(diagramData.classes)) {
@@ -77,29 +53,13 @@ function validateRelations(diagramData) {
   return diagramData;
 }
 
-const DIAGRAM_JSON_FORMAT = `Respond with ONLY a JSON object with this exact structure (no markdown, no extra text):
-{
-  "classes": {
-    "<ClassName>": {
-      "name": "<ClassName>",
-      "stereotype": "none"|"entity"|"interface"|"abstract"|"service"|"controller"|"repository",
-      "isAbstract": false,
-      "description": "...",
-      "attributes": [
-        { "id": "placeholder", "visibility": "+"|"-"|"#"|"~", "name": "...", "type": "...", "defaultValue": "", "isStatic": false, "isAbstract": false }
-      ],
-      "methods": [
-        { "id": "placeholder", "visibility": "+", "name": "...", "returnType": "void", "parameters": [{ "id": "placeholder", "name": "...", "type": "..." }], "isStatic": false, "isAbstract": false }
-      ],
-      "relations": [
-        { "id": "placeholder", "type": "association"|"aggregation"|"composition"|"inheritance"|"implementation"|"dependency", "target": "<OtherClassName>", "sourceMultiplicity": "1", "targetMultiplicity": "1", "sourceRole": "", "targetRole": "" }
-      ]
-    }
-  },
-  "layout": {
-    "<ClassName>": { "x": 40, "y": 60 }
-  }
-}`;
+function validateSequence(data) {
+  const participantIds = new Set(data.participants.map((p) => p.id));
+  data.messages = data.messages.filter(
+    (m) => participantIds.has(m.from) && participantIds.has(m.to)
+  );
+  return data;
+}
 
 export async function diagramToJavaCode(classes) {
   const serialized = serializeClassesForPrompt(classes);
@@ -165,18 +125,32 @@ ${DIAGRAM_JSON_FORMAT}`,
 
 const DIAGRAM_UPDATE_MARKER = "[DIAGRAM_UPDATE]";
 
-export async function* chatAboutDiagram(messages, currentState) {
-  const serialized = serializeClassesForPrompt(currentState.classes);
-  const trimmedMessages = messages.slice(-20);
+export async function* chatAboutDiagram(messages, currentState, activeTab) {
+  const isSequence = activeTab === "sequence";
 
-  const stream = await client.chat.completions.create({
-    model: "gpt-4.1",
-    temperature: 0.4,
-    stream: true,
-    messages: [
-      {
-        role: "system",
-        content: `You are an AI assistant helping with UML diagram design. The user has a UML diagram editor open.
+  const serialized = isSequence
+    ? serializeSequenceForPrompt(currentState.sequence)
+    : serializeClassesForPrompt(currentState.classes);
+
+  const diagramType = isSequence ? "sequence" : "class";
+
+  const systemPrompt = isSequence
+    ? `You are an AI assistant helping with UML sequence diagram design. The user has a sequence diagram editor open.
+
+Current sequence diagram state:
+${serialized}
+
+You can:
+1. Answer questions about the diagram or UML/software design in general
+2. Suggest improvements or modifications to the sequence flow
+3. Modify the diagram when the user asks you to add, remove, or change participants/messages
+
+Important: Every sequence diagram must have at least 2 participants and 1 message.
+
+When you want to modify the diagram, explain what you'll change, then end your response with the exact marker ${DIAGRAM_UPDATE_MARKER} on its own line. Only use this marker when you are actually making changes to the diagram.
+
+When NOT modifying the diagram (just answering questions or brainstorming), do NOT include the marker.`
+    : `You are an AI assistant helping with UML diagram design. The user has a UML diagram editor open.
 
 Current diagram state:
 ${serialized}
@@ -186,10 +160,20 @@ You can:
 2. Suggest improvements, design patterns, or modifications
 3. Modify the diagram when the user asks you to add, remove, or change classes/attributes/methods/relationships
 
+Important: Every class must have at least one attribute. Never create empty classes with no attributes.
+
 When you want to modify the diagram, explain what you'll change, then end your response with the exact marker ${DIAGRAM_UPDATE_MARKER} on its own line. Only use this marker when you are actually making changes to the diagram.
 
-When NOT modifying the diagram (just answering questions or brainstorming), do NOT include the marker.`,
-      },
+When NOT modifying the diagram (just answering questions or brainstorming), do NOT include the marker.`;
+
+  const trimmedMessages = messages.slice(-20);
+
+  const stream = await client.chat.completions.create({
+    model: "gpt-4.1",
+    temperature: 0.4,
+    stream: true,
+    messages: [
+      { role: "system", content: systemPrompt },
       ...trimmedMessages,
     ],
   });
@@ -209,13 +193,20 @@ When NOT modifying the diagram (just answering questions or brainstorming), do N
   if (wantsDiagramUpdate) {
     fullText = fullText.replace(DIAGRAM_UPDATE_MARKER, "").trimEnd();
 
-    const updateResponse = await client.chat.completions.create({
-      model: "gpt-4.1",
-      temperature: 0.1,
-      messages: [
-        {
-          role: "system",
-          content: `You are a UML diagram editor. Based on the conversation, produce the updated diagram state as structured JSON.
+    const updateSystemPrompt = isSequence
+      ? `You are a UML sequence diagram editor. Based on the conversation, produce the updated sequence diagram state as structured JSON.
+
+Current sequence diagram state (for reference):
+${JSON.stringify(currentState.sequence, null, 2)}
+
+Rules:
+- Preserve existing participants/messages unless the user asked to change them
+- Generate placeholder UUIDs for all new id fields (they will be replaced)
+- The "from" and "to" fields in messages must reference participant "id" values from the participants array
+- Keep existing IDs for unchanged elements so references stay valid
+
+${SEQUENCE_JSON_FORMAT}`
+      : `You are a UML diagram editor. Based on the conversation, produce the updated diagram state as structured JSON.
 
 Current diagram state (for reference):
 ${JSON.stringify({ classes: currentState.classes, layout: currentState.layout }, null, 2)}
@@ -225,20 +216,31 @@ Rules:
 - Generate placeholder UUIDs for all new id fields (they will be replaced)
 - Layout: keep existing positions for unchanged classes, place new classes in available grid positions (340px H, 240px V spacing from x=40 y=60, snap to 20)
 - The key for each class in "classes" must match its "name" field
+- Every class must have at least one attribute — never produce a class with an empty attributes array
 
-${DIAGRAM_JSON_FORMAT}`,
-        },
+${DIAGRAM_JSON_FORMAT}`;
+
+    const updateResponse = await client.chat.completions.create({
+      model: "gpt-4.1",
+      temperature: 0.1,
+      messages: [
+        { role: "system", content: updateSystemPrompt },
         ...trimmedMessages,
         { role: "assistant", content: fullText },
       ],
       response_format: { type: "json_object" },
     });
 
-    diagramUpdate = JSON.parse(updateResponse.choices[0].message.content);
-    diagramUpdate = validateRelations(regenerateIds(diagramUpdate));
+    const rawUpdate = JSON.parse(updateResponse.choices[0].message.content);
+
+    if (isSequence) {
+      diagramUpdate = validateSequence(regenerateSequenceIds(rawUpdate));
+    } else {
+      diagramUpdate = validateRelations(regenerateIds(rawUpdate));
+    }
   }
 
-  yield { type: "result", text: fullText, diagramUpdate };
+  yield { type: "result", text: fullText, diagramUpdate, diagramType };
 }
 
 export function isApiKeyConfigured() {
