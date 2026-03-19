@@ -12,6 +12,7 @@ export const STEREOTYPE_OPTIONS = ["none", "entity", "interface", "abstract", "s
 export const MULTIPLICITY_OPTIONS = ["", "1", "0..1", "*", "1..*"];
 export const GRID_SIZE = 20;
 export const CARD_WIDTH = 280;
+export const CANVAS_WIDTH = 1600;
 export const HEADER_HEIGHT = 64;
 export const LINE_HEIGHT = 18;
 export const SECTION_GAP = 16;

@@ -1,12 +1,12 @@
-import { forwardRef, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { CARD_WIDTH, GRID_SIZE, STEREOTYPE_OPTIONS } from "./constants.js";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { Maximize2, ZoomIn, ZoomOut } from "lucide-react";
+import { CARD_WIDTH, GRID_SIZE } from "./constants.js";
 import { getClassHeight, getConnectionSides } from "./geometry.js";
 import { createEmptyAttribute, createEmptyMethod } from "./factories.js";
 import { RelationshipLine } from "./RelationshipLine.jsx";
 import { UMLCard } from "./UMLCard.jsx";
-import { AttributeEditor } from "./sidebar/AttributeEditor.jsx";
-import { MethodEditor } from "./sidebar/MethodEditor.jsx";
-import { RelationshipEditor } from "./sidebar/RelationshipEditor.jsx";
+import { ClassSidebarPanel } from "./sidebar/ClassSidebarPanel.jsx";
+import { cn } from "../../lib/utils.js";
 
 function snap(value) {
   return Math.round(value / GRID_SIZE) * GRID_SIZE;
@@ -14,7 +14,59 @@ function snap(value) {
 
 export const ClassDiagramEditor = forwardRef(function ClassDiagramEditor({ state, setState }, ref) {
   const [dragging, setDragging] = useState(null);
+  const [panning, setPanning] = useState(null);
+  const [sidebarSide, setSidebarSide] = useState('right');
+  const [camera, setCamera] = useState({ x: 0, y: 0, zoom: 1 });
+  const [containerSize, setContainerSize] = useState({ width: 1200, height: 700 });
   const svgRef = useRef(null);
+  const cameraRef = useRef(camera);
+
+  useEffect(() => { cameraRef.current = camera; }, [camera]);
+
+  // Track SVG container size
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      setContainerSize({ width: entry.contentRect.width, height: entry.contentRect.height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Wheel zoom centered on cursor
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const onWheel = (e) => {
+      e.preventDefault();
+      const cam = cameraRef.current;
+      const rect = svg.getBoundingClientRect();
+      const vb = svg.viewBox.baseVal;
+
+      const factor = e.deltaY > 0 ? 1 / 1.1 : 1.1;
+      const newZoom = Math.min(3.0, Math.max(0.25, cam.zoom * factor));
+
+      const mouseRatioX = (e.clientX - rect.left) / rect.width;
+      const mouseRatioY = (e.clientY - rect.top) / rect.height;
+      const cursorX = vb.x + mouseRatioX * vb.width;
+      const cursorY = vb.y + mouseRatioY * vb.height;
+
+      const newVW = rect.width / newZoom;
+      const newVH = rect.height / newZoom;
+
+      setCamera({
+        x: cursorX - mouseRatioX * newVW,
+        y: cursorY - mouseRatioY * newVH,
+        zoom: newZoom,
+      });
+    };
+    svg.addEventListener('wheel', onWheel, { passive: false });
+    return () => svg.removeEventListener('wheel', onWheel);
+  }, []);
+
+  const viewWidth = (containerSize.width || 1200) / camera.zoom;
+  const viewHeight = (containerSize.height || 700) / camera.zoom;
 
   useImperativeHandle(ref, () => ({
     getSvgElement: () => svgRef.current,
@@ -33,6 +85,8 @@ export const ClassDiagramEditor = forwardRef(function ClassDiagramEditor({ state
   );
 
   const preparedRelations = useMemo(() => {
+    const MAX_PER_SIDE = 2;
+    const SIDE_ORDER = ["right", "bottom", "left", "top"];
     const portMap = {};
     const entries = [];
 
@@ -42,14 +96,51 @@ export const ClassDiagramEditor = forwardRef(function ClassDiagramEditor({ state
       for (const rel of classes[name].relations) {
         const target = layout[rel.target];
         if (!target) continue;
-        const { sourceSide, targetSide } = getConnectionSides(
+        const computedSides = getConnectionSides(
           source, target, classHeights[name] ?? 0, classHeights[rel.target] ?? 0
         );
+        const sourceSide = rel.sourceSideOverride || computedSides.sourceSide;
+        const targetSide = rel.targetSideOverride || computedSides.targetSide;
         if (!portMap[name]) portMap[name] = { left: [], right: [], top: [], bottom: [] };
         if (!portMap[rel.target]) portMap[rel.target] = { left: [], right: [], top: [], bottom: [] };
         portMap[name][sourceSide].push(rel.id);
         portMap[rel.target][targetSide].push(rel.id);
         entries.push({ sourceName: name, rel, sourceSide, targetSide });
+      }
+    }
+
+    // Redistribute overloaded sides (max 2 per side per class)
+    for (const className of Object.keys(portMap)) {
+      for (let s = 0; s < SIDE_ORDER.length; s++) {
+        const side = SIDE_ORDER[s];
+        const ports = portMap[className][side];
+        if (ports.length <= MAX_PER_SIDE) continue;
+        const excess = ports.splice(MAX_PER_SIDE);
+        for (const relId of excess) {
+          const entry = entries.find(e => e.rel.id === relId && (e.sourceName === className || e.rel.target === className));
+          // Skip manually overridden endpoints
+          if (entry) {
+            const isOverridden = (entry.sourceName === className && entry.rel.sourceSideOverride) ||
+                                 (entry.rel.target === className && entry.rel.targetSideOverride);
+            if (isOverridden) { ports.push(relId); continue; }
+          }
+          let placed = false;
+          for (let offset = 1; offset < 4; offset++) {
+            const nextSide = SIDE_ORDER[(s + offset) % 4];
+            if (portMap[className][nextSide].length < MAX_PER_SIDE) {
+              portMap[className][nextSide].push(relId);
+              if (entry) {
+                if (entry.sourceName === className) entry.sourceSide = nextSide;
+                else entry.targetSide = nextSide;
+              }
+              placed = true;
+              break;
+            }
+          }
+          if (!placed) {
+            ports.push(relId);
+          }
+        }
       }
     }
 
@@ -73,19 +164,6 @@ export const ClassDiagramEditor = forwardRef(function ClassDiagramEditor({ state
     });
   }, [classes, layout, classHeights]);
 
-  const canvasHeight = useMemo(() => {
-    const MIN_HEIGHT = 720;
-    const PADDING = 80;
-    let maxBottom = 0;
-    for (const name of classNames) {
-      const pos = layout[name];
-      if (pos) {
-        const bottom = pos.y + (classHeights[name] ?? 0);
-        if (bottom > maxBottom) maxBottom = bottom;
-      }
-    }
-    return Math.max(MIN_HEIGHT, maxBottom + PADDING);
-  }, [classNames, layout, classHeights]);
 
   const setSelected = (nextSelected) => {
     setState((current) => ({
@@ -136,8 +214,8 @@ export const ClassDiagramEditor = forwardRef(function ClassDiagramEditor({ state
         layout: {
           ...current.layout,
           [nextName]: {
-            x: snap(40 + (existingNames.length % 3) * 340),
-            y: snap(60 + Math.floor(existingNames.length / 3) * 220)
+            x: snap(40 + (existingNames.length % 4) * 380),
+            y: snap(60 + Math.floor(existingNames.length / 4) * 240)
           }
         }
       };
@@ -210,8 +288,8 @@ export const ClassDiagramEditor = forwardRef(function ClassDiagramEditor({ state
       const nextLayout = {};
       names.forEach((name, index) => {
         nextLayout[name] = {
-          x: snap(40 + (index % 3) * 340),
-          y: snap(60 + Math.floor(index / 3) * 240)
+          x: snap(40 + (index % 4) * 380),
+          y: snap(60 + Math.floor(index / 4) * 240)
         };
       });
 
@@ -222,6 +300,22 @@ export const ClassDiagramEditor = forwardRef(function ClassDiagramEditor({ state
     });
   };
 
+  const cycleSide = (relationId, endpoint, currentSide) => {
+    const SIDE_ORDER = ["right", "bottom", "left", "top"];
+    const nextSide = SIDE_ORDER[(SIDE_ORDER.indexOf(currentSide) + 1) % 4];
+    setState((current) => {
+      const nextClasses = JSON.parse(JSON.stringify(current.classes));
+      for (const cls of Object.values(nextClasses)) {
+        for (const rel of cls.relations) {
+          if (rel.id === relationId) {
+            rel[endpoint === 'source' ? 'sourceSideOverride' : 'targetSideOverride'] = nextSide;
+          }
+        }
+      }
+      return { ...current, classes: nextClasses };
+    });
+  };
+
   const getSvgPoint = (clientX, clientY) => {
     const svg = svgRef.current;
     if (!svg) {
@@ -229,10 +323,10 @@ export const ClassDiagramEditor = forwardRef(function ClassDiagramEditor({ state
     }
 
     const rect = svg.getBoundingClientRect();
-    const viewBox = svg.viewBox.baseVal;
+    const vb = svg.viewBox.baseVal;
     return {
-      x: ((clientX - rect.left) / rect.width) * viewBox.width,
-      y: ((clientY - rect.top) / rect.height) * viewBox.height
+      x: vb.x + ((clientX - rect.left) / rect.width) * vb.width,
+      y: vb.y + ((clientY - rect.top) / rect.height) * vb.height,
     };
   };
 
@@ -246,7 +340,26 @@ export const ClassDiagramEditor = forwardRef(function ClassDiagramEditor({ state
     });
   };
 
+  const handlePanStart = (e) => {
+    if (e.button !== 0) return;
+    setPanning({
+      clientX: e.clientX,
+      clientY: e.clientY,
+      startX: camera.x,
+      startY: camera.y,
+    });
+    svgRef.current?.setPointerCapture(e.pointerId);
+  };
+
   const handlePointerMove = (event) => {
+    if (panning) {
+      const rect = svgRef.current.getBoundingClientRect();
+      const dx = (event.clientX - panning.clientX) * (viewWidth / rect.width);
+      const dy = (event.clientY - panning.clientY) * (viewHeight / rect.height);
+      setCamera(prev => ({ ...prev, x: panning.startX - dx, y: panning.startY - dy }));
+      return;
+    }
+
     if (!dragging) {
       return;
     }
@@ -257,46 +370,121 @@ export const ClassDiagramEditor = forwardRef(function ClassDiagramEditor({ state
       layout: {
         ...current.layout,
         [dragging.name]: {
-          x: Math.max(0, Math.min(snap(pointer.x - dragging.offsetX), 1080 - CARD_WIDTH)),
-          y: Math.max(0, snap(pointer.y - dragging.offsetY))
+          x: snap(pointer.x - dragging.offsetX),
+          y: snap(pointer.y - dragging.offsetY),
         }
       }
     }));
   };
 
-  const handlePointerUp = () => {
+  const handlePointerUp = (event) => {
+    if (panning) {
+      svgRef.current?.releasePointerCapture(event.pointerId);
+      setPanning(null);
+    }
     setDragging(null);
   };
 
+  const handleZoomButton = (direction) => {
+    setCamera(prev => {
+      const oldVW = (containerSize.width || 1200) / prev.zoom;
+      const oldVH = (containerSize.height || 700) / prev.zoom;
+      const centerX = prev.x + oldVW / 2;
+      const centerY = prev.y + oldVH / 2;
+
+      const newZoom = Math.min(3.0, Math.max(0.25, +(prev.zoom + direction * 0.1).toFixed(2)));
+      const newVW = (containerSize.width || 1200) / newZoom;
+      const newVH = (containerSize.height || 700) / newZoom;
+
+      return { x: centerX - newVW / 2, y: centerY - newVH / 2, zoom: newZoom };
+    });
+  };
+
+  const fitAll = () => {
+    if (classNames.length === 0) return;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const name of classNames) {
+      const pos = layout[name];
+      if (!pos) continue;
+      minX = Math.min(minX, pos.x);
+      minY = Math.min(minY, pos.y);
+      maxX = Math.max(maxX, pos.x + CARD_WIDTH);
+      maxY = Math.max(maxY, pos.y + (classHeights[name] ?? 200));
+    }
+    const pad = 60;
+    const cw = containerSize.width || 1200;
+    const ch = containerSize.height || 700;
+    const contentW = maxX - minX + 2 * pad;
+    const contentH = maxY - minY + 2 * pad;
+    const newZoom = Math.min(3.0, Math.max(0.25, Math.min(cw / contentW, ch / contentH)));
+    const newVW = cw / newZoom;
+    const newVH = ch / newZoom;
+    setCamera({
+      x: (minX - pad) - (newVW - contentW) / 2,
+      y: (minY - pad) - (newVH - contentH) / 2,
+      zoom: newZoom,
+    });
+  };
+
   return (
-    <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_420px]">
-      <div className="rounded-3xl bg-white p-4 shadow-sm">
+    <div className="relative">
+      <div className="rounded-3xl bg-white p-4 shadow-sm overflow-hidden"
+           style={{ height: 'calc(100vh - 260px)', minHeight: '500px' }}>
         <svg
           ref={svgRef}
-          viewBox={`0 0 1080 ${canvasHeight}`}
+          viewBox={`${camera.x} ${camera.y} ${viewWidth} ${viewHeight}`}
           preserveAspectRatio="xMinYMin meet"
-          className="w-full touch-none rounded-2xl bg-[linear-gradient(to_right,#e2e8f0_1px,transparent_1px),linear-gradient(to_bottom,#e2e8f0_1px,transparent_1px)] bg-[size:20px_20px]"
+          className="h-full w-full touch-none rounded-2xl"
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerLeave={handlePointerUp}
         >
           <defs>
-            <marker id="arrow-open" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
-              <path d="M 0 0 L 10 6 L 0 12" fill="none" stroke="#64748b" strokeWidth="1.5" />
+            <pattern id="grid-pattern" width={GRID_SIZE} height={GRID_SIZE} patternUnits="userSpaceOnUse">
+              <path d={`M ${GRID_SIZE} 0 L 0 0 0 ${GRID_SIZE}`} fill="none" stroke="#e2e8f0" strokeWidth="0.5" />
+            </pattern>
+
+            {/* Arrow open (markerEnd for association, dependency, aggregation, composition) */}
+            <marker id="arrow-open" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto" markerUnits="userSpaceOnUse">
+              <path d="M 1 1 L 13 7 L 1 13" fill="none" stroke="#64748b" strokeWidth="1.5" />
             </marker>
-            <marker id="triangle-open" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto" markerUnits="strokeWidth">
-              <path d="M 0 0 L 12 7 L 0 14 Z" fill="white" stroke="#64748b" strokeWidth="1.5" />
+
+            {/* Triangle open (markerEnd for inheritance, implementation) */}
+            <marker id="triangle-open" markerWidth="16" markerHeight="16" refX="15" refY="8" orient="auto" markerUnits="userSpaceOnUse">
+              <path d="M 1 1 L 15 8 L 1 15 Z" fill="white" stroke="#64748b" strokeWidth="1.5" />
             </marker>
-            <marker id="diamond-open" markerWidth="16" markerHeight="16" refX="14" refY="8" orient="auto" markerUnits="strokeWidth">
-              <path d="M 0 8 L 6 0 L 12 8 L 6 16 Z" fill="white" stroke="#64748b" strokeWidth="1.5" />
+
+            {/* Diamond open (markerStart for aggregation) */}
+            <marker id="diamond-open-start" markerWidth="18" markerHeight="14" refX="1" refY="7" orient="auto" markerUnits="userSpaceOnUse">
+              <path d="M 1 7 L 9 1 L 17 7 L 9 13 Z" fill="white" stroke="#64748b" strokeWidth="1.5" />
             </marker>
-            <marker id="diamond-filled" markerWidth="16" markerHeight="16" refX="14" refY="8" orient="auto" markerUnits="strokeWidth">
-              <path d="M 0 8 L 6 0 L 12 8 L 6 16 Z" fill="#64748b" stroke="#64748b" strokeWidth="1.5" />
+
+            {/* Diamond filled (markerStart for composition) */}
+            <marker id="diamond-filled-start" markerWidth="18" markerHeight="14" refX="1" refY="7" orient="auto" markerUnits="userSpaceOnUse">
+              <path d="M 1 7 L 9 1 L 17 7 L 9 13 Z" fill="#64748b" stroke="#64748b" strokeWidth="1.5" />
             </marker>
           </defs>
 
+          {/* White background + grid — receives pan gestures */}
+          <rect
+            x={camera.x - 2000}
+            y={camera.y - 2000}
+            width={viewWidth + 4000}
+            height={viewHeight + 4000}
+            fill="white"
+          />
+          <rect
+            x={camera.x - 2000}
+            y={camera.y - 2000}
+            width={viewWidth + 4000}
+            height={viewHeight + 4000}
+            fill="url(#grid-pattern)"
+            onPointerDown={handlePanStart}
+            style={{ cursor: panning ? 'grabbing' : 'grab' }}
+          />
+
           {preparedRelations.map((entry) => (
-            <RelationshipLine key={entry.key} {...entry} />
+            <RelationshipLine key={entry.key} {...entry} onCycleSide={cycleSide} />
           ))}
 
           {classNames.map((name) => (
@@ -314,50 +502,49 @@ export const ClassDiagramEditor = forwardRef(function ClassDiagramEditor({ state
         </svg>
       </div>
 
-      <div className="rounded-3xl bg-white p-6 shadow-sm">
-        {selectedClass ? (
-          <>
-            <div className="mb-4 inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">
-              UML Class Editor
-            </div>
-            <div className="space-y-4">
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-slate-900">Class name</label>
-                <input value={selectedClass.name} onChange={(event) => renameSelectedClass(event.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
-              </div>
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-slate-900">Stereotype</label>
-                <select value={selectedClass.stereotype} onChange={(event) => updateSelectedClass({ stereotype: event.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
-                  {STEREOTYPE_OPTIONS.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex items-center gap-4 text-sm text-slate-700">
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" checked={selectedClass.isAbstract} onChange={(event) => updateSelectedClass({ isAbstract: event.target.checked })} />
-                  Abstract class
-                </label>
-              </div>
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-slate-900">Description</label>
-                <textarea value={selectedClass.description} onChange={(event) => updateSelectedClass({ description: event.target.value })} rows={3} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm" />
-              </div>
-            </div>
-
-            <AttributeEditor items={selectedClass.attributes} onChange={(attributes) => updateSelectedClass({ attributes })} />
-            <MethodEditor items={selectedClass.methods} onChange={(methods) => updateSelectedClass({ methods })} />
-            <RelationshipEditor
-              classNames={classNames}
-              selectedName={selected}
-              items={selectedClass.relations}
-              onChange={(relations) => updateSelectedClass({ relations })}
-            />
-          </>
-        ) : null}
+      {/* Zoom controls */}
+      <div className={cn(
+        "absolute bottom-4 z-20 flex items-center gap-1 rounded-2xl bg-white px-2 py-1.5 shadow-lg border border-slate-200",
+        sidebarSide === 'right' ? 'left-4' : 'right-4'
+      )}>
+        <button
+          type="button"
+          onClick={() => handleZoomButton(-1)}
+          disabled={camera.zoom <= 0.25}
+          className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <ZoomOut size={16} />
+        </button>
+        <span className="min-w-[3rem] text-center text-xs font-medium text-slate-600">
+          {Math.round(camera.zoom * 100)}%
+        </span>
+        <button
+          type="button"
+          onClick={() => handleZoomButton(1)}
+          disabled={camera.zoom >= 3.0}
+          className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <ZoomIn size={16} />
+        </button>
+        <button
+          type="button"
+          onClick={fitAll}
+          className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+          title="Fit all"
+        >
+          <Maximize2 size={16} />
+        </button>
       </div>
+
+      <ClassSidebarPanel
+        selectedClass={selectedClass}
+        classNames={classNames}
+        selectedName={selected}
+        onRenameClass={renameSelectedClass}
+        onUpdateClass={updateSelectedClass}
+        sidebarSide={sidebarSide}
+        onToggleSide={() => setSidebarSide(s => s === 'right' ? 'left' : 'right')}
+      />
     </div>
   );
 });

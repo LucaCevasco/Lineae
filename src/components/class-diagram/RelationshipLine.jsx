@@ -1,9 +1,10 @@
 import { CARD_WIDTH } from "./constants.js";
-import { getPortPosition, getRelationshipDash, getMarkerEndId } from "./geometry.js";
+import { getPortPosition, getRelationshipDash, getMarkerStartId, getMarkerEndId } from "./geometry.js";
 
 export function RelationshipLine({
   source, target, sourceHeight, targetHeight, relationship,
-  sourceSide, targetSide, sourcePortIndex, sourcePortTotal, targetPortIndex, targetPortTotal
+  sourceSide, targetSide, sourcePortIndex, sourcePortTotal, targetPortIndex, targetPortTotal,
+  onCycleSide
 }) {
   if (!target) {
     return null;
@@ -41,13 +42,34 @@ export function RelationshipLine({
   const srcStagger = sourcePortTotal > 1 ? sourcePortIndex * 14 : 0;
   const tgtStagger = targetPortTotal > 1 ? targetPortIndex * 14 : 0;
 
+  // Extra offset to clear markers: diamonds on source for aggregation/composition, triangles on target for inheritance
+  const sourceMarkerClearance = (() => {
+    switch (relationship.type) {
+      case "aggregation":
+      case "composition":
+        return 20;
+      default:
+        return 10;
+    }
+  })();
+
+  const targetMarkerClearance = (() => {
+    switch (relationship.type) {
+      case "inheritance":
+      case "implementation":
+        return 18;
+      default:
+        return 10;
+    }
+  })();
+
   const srcLabelDir = sourceSide === "left" || sourceSide === "right"
-    ? { dx: (sourceSide === "left" ? -8 : 8) + (sourceSide === "left" ? -srcStagger : srcStagger), dyMult: -8, dyRole: 14, anchor: sourceSide === "left" ? "end" : "start" }
-    : { dx: 8, dyMult: (sourceSide === "top" ? -8 : 14) + (sourceSide === "top" ? -srcStagger : srcStagger), dyRole: (sourceSide === "top" ? -22 : 28) + (sourceSide === "top" ? -srcStagger : srcStagger), anchor: "start" };
+    ? { dx: (sourceSide === "left" ? -sourceMarkerClearance : sourceMarkerClearance) + (sourceSide === "left" ? -srcStagger : srcStagger), dyMult: -8, anchor: sourceSide === "left" ? "end" : "start" }
+    : { dx: 8, dyMult: (sourceSide === "top" ? -sourceMarkerClearance : sourceMarkerClearance + 6) + (sourceSide === "top" ? -srcStagger : srcStagger), anchor: "start" };
 
   const tgtLabelDir = targetSide === "left" || targetSide === "right"
-    ? { dx: (targetSide === "left" ? -8 : 8) + (targetSide === "left" ? -tgtStagger : tgtStagger), dyMult: -8, dyRole: 14, anchor: targetSide === "left" ? "end" : "start" }
-    : { dx: -8, dyMult: (targetSide === "top" ? -8 : 14) + (targetSide === "top" ? -tgtStagger : tgtStagger), dyRole: (targetSide === "top" ? -22 : 28) + (targetSide === "top" ? -tgtStagger : tgtStagger), anchor: "end" };
+    ? { dx: (targetSide === "left" ? -targetMarkerClearance : targetMarkerClearance) + (targetSide === "left" ? -tgtStagger : tgtStagger), dyMult: -8, anchor: targetSide === "left" ? "end" : "start" }
+    : { dx: -8, dyMult: (targetSide === "top" ? -targetMarkerClearance : targetMarkerClearance + 6) + (targetSide === "top" ? -tgtStagger : tgtStagger), anchor: "end" };
 
   return (
     <g>
@@ -57,6 +79,7 @@ export function RelationshipLine({
         className="stroke-slate-500"
         strokeWidth={2}
         strokeDasharray={getRelationshipDash(relationship.type)}
+        markerStart={getMarkerStartId(relationship.type)}
         markerEnd={getMarkerEndId(relationship.type)}
       />
       {relationship.sourceMultiplicity ? (
@@ -69,19 +92,34 @@ export function RelationshipLine({
           {relationship.targetMultiplicity}
         </text>
       ) : null}
-      {relationship.sourceRole ? (
-        <text x={start.x + srcLabelDir.dx} y={start.y + srcLabelDir.dyRole} textAnchor={srcLabelDir.anchor} className="fill-slate-500 text-[11px]">
-          {relationship.sourceRole}
+      {relationship.sourceRole && relationship.targetRole ? (
+        <>
+          <text x={midX} y={midY - 6} textAnchor="middle" className="fill-slate-600 text-[11px] font-medium">
+            {relationship.sourceRole}
+          </text>
+          <text x={midX} y={midY + 8} textAnchor="middle" className="fill-slate-600 text-[11px] font-medium">
+            {relationship.targetRole}
+          </text>
+        </>
+      ) : (relationship.sourceRole || relationship.targetRole) ? (
+        <text x={midX} y={midY} textAnchor="middle" className="fill-slate-600 text-[11px] font-medium">
+          {relationship.sourceRole || relationship.targetRole}
         </text>
       ) : null}
-      {relationship.targetRole ? (
-        <text x={end.x + tgtLabelDir.dx} y={end.y + tgtLabelDir.dyRole} textAnchor={tgtLabelDir.anchor} className="fill-slate-500 text-[11px]">
-          {relationship.targetRole}
-        </text>
-      ) : null}
-      <text x={midX} y={midY} textAnchor="middle" className="fill-slate-500 text-[11px]">
-        {relationship.type}
-      </text>
+
+      {/* Visible dot hints */}
+      <circle cx={start.x} cy={start.y} r={3} className="fill-slate-300 pointer-events-none" />
+      <circle cx={end.x} cy={end.y} r={3} className="fill-slate-300 pointer-events-none" />
+
+      {/* Clickable hit areas */}
+      <circle cx={start.x} cy={start.y} r={10}
+        className="cursor-pointer fill-transparent hover:fill-blue-200/60"
+        onClick={(e) => { e.stopPropagation(); onCycleSide?.(relationship.id, 'source', sourceSide); }}
+      />
+      <circle cx={end.x} cy={end.y} r={10}
+        className="cursor-pointer fill-transparent hover:fill-blue-200/60"
+        onClick={(e) => { e.stopPropagation(); onCycleSide?.(relationship.id, 'target', targetSide); }}
+      />
     </g>
   );
 }

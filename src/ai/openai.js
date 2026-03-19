@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { serializeClassesForPrompt, DIAGRAM_JSON_FORMAT } from "./classPrompts.js";
+import { serializeClassesForPrompt, DIAGRAM_JSON_FORMAT, RELATIONSHIP_DIRECTION_RULES } from "./classPrompts.js";
 import { serializeSequenceForPrompt, SEQUENCE_JSON_FORMAT } from "./sequencePrompts.js";
 import { serializeERForPrompt, ER_JSON_FORMAT } from "./erPrompts.js";
 
@@ -97,6 +97,7 @@ Rules:
 - Map visibility: + → public, - → private, # → protected, ~ → package-private (no modifier)
 - Map stereotypes: "interface" → Java interface, "abstract" → abstract class, others → class
 - Map relationships: inheritance → extends, implementation → implements, association/aggregation/composition → fields with appropriate types (use List<T> for * or 1..* multiplicities)
+- ${RELATIONSHIP_DIRECTION_RULES}
 - Include proper imports (java.util.List, java.util.ArrayList, etc.)
 - Use role names for field names when available, otherwise use lowercase class name
 - Generate constructors, getters, and setters for attributes
@@ -126,6 +127,7 @@ Rules:
 - Map class types: interface → stereotype "interface", abstract class → stereotype "abstract" + isAbstract true, regular class → stereotype "entity"
 - Extract extends as "inheritance" relation, implements as "implementation" relation
 - Extract fields that reference other classes in the diagram as "association" relations
+- ${RELATIONSHIP_DIRECTION_RULES}
 - Use List<T>/Collection<T> fields to infer 1..* multiplicities
 - Set defaultValue to empty string "" if no default
 - Generate placeholder UUIDs for all id fields (they will be replaced)

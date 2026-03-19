@@ -43,7 +43,17 @@ export function serializeClassesForPrompt(classes) {
   return lines.join("\n");
 }
 
-export const DIAGRAM_JSON_FORMAT = `Respond with ONLY a JSON object with this exact structure (no markdown, no extra text):
+export const RELATIONSHIP_DIRECTION_RULES = `IMPORTANT relationship direction rules:
+- inheritance: the class that inherits DEFINES the relation, target is the superclass (e.g., Chofer defines inheritance targeting Usuario)
+- implementation: the class that implements DEFINES the relation, target is the interface
+- composition: the "whole" (container) class DEFINES the relation, target is the "part" (e.g., Auto defines composition targeting Motor)
+- aggregation: the "whole" class DEFINES the relation, target is the "part"
+- association: either class can define it; use sourceRole/targetRole to clarify
+- dependency: the dependent class DEFINES the relation, target is the dependency`;
+
+export const DIAGRAM_JSON_FORMAT = `${RELATIONSHIP_DIRECTION_RULES}
+
+Respond with ONLY a JSON object with this exact structure (no markdown, no extra text):
 {
   "classes": {
     "<ClassName>": {

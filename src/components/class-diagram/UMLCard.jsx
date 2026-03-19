@@ -17,7 +17,7 @@ export function UMLCard({ item, isSelected, onSelect, onDelete, onPointerDown, x
       onClick={onSelect}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      onPointerDown={onPointerDown}
+      onPointerDown={(e) => { e.stopPropagation(); onPointerDown(e); }}
       role="button"
       tabIndex={0}
       className="cursor-grab active:cursor-grabbing"

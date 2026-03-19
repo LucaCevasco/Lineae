@@ -252,8 +252,8 @@ export default function App() {
         layout: {
           ...current.layout,
           [nextName]: {
-            x: Math.round((40 + (existingNames.length % 3) * 340) / 20) * 20,
-            y: Math.round((60 + Math.floor(existingNames.length / 3) * 220) / 20) * 20
+            x: Math.round((40 + (existingNames.length % 4) * 380) / 20) * 20,
+            y: Math.round((60 + Math.floor(existingNames.length / 4) * 240) / 20) * 20
           }
         }
       };

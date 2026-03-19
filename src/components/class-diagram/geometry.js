@@ -25,18 +25,26 @@ export function getClassHeight(umlClass) {
   return Math.max(160, header + attributeSection + methodSection);
 }
 
+export function getMarkerStartId(type) {
+  switch (type) {
+    case "aggregation":
+      return "url(#diamond-open-start)";
+    case "composition":
+      return "url(#diamond-filled-start)";
+    default:
+      return undefined;
+  }
+}
+
 export function getMarkerEndId(type) {
   switch (type) {
     case "aggregation":
-      return "url(#diamond-open)";
     case "composition":
-      return "url(#diamond-filled)";
+      return "url(#arrow-open)";
     case "inheritance":
-      return "url(#triangle-open)";
     case "implementation":
       return "url(#triangle-open)";
     case "dependency":
-      return "url(#arrow-open)";
     default:
       return "url(#arrow-open)";
   }

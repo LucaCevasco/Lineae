@@ -38,6 +38,8 @@ export function createEmptyRelationship(target) {
     sourceMultiplicity: "1",
     targetMultiplicity: "1",
     sourceRole: "",
-    targetRole: ""
+    targetRole: "",
+    sourceSideOverride: null,
+    targetSideOverride: null
   };
 }
