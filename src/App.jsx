@@ -1,16 +1,20 @@
 import { useEffect, useRef, useState } from "react";
-import { Code, Download, FileCode, MessageSquare, Plus, RotateCcw, RotateCw, Save, Upload, Users, ArrowRightLeft } from "lucide-react";
+import { Code, Database, Download, FileCode, MessageSquare, Plus, RotateCcw, RotateCw, Save, Table2, Upload, Users, ArrowRightLeft } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "./components/ui/tabs.jsx";
 import { useHistoryState } from "./hooks/useHistoryState.js";
 import { ToolbarButton } from "./components/shared/ToolbarButton.jsx";
 import { ChatPanel } from "./components/shared/ChatPanel.jsx";
 import { JavaExportModal } from "./components/shared/JavaExportModal.jsx";
 import { JavaImportModal } from "./components/shared/JavaImportModal.jsx";
+import { SQLExportModal } from "./components/shared/SQLExportModal.jsx";
+import { SQLImportModal } from "./components/shared/SQLImportModal.jsx";
 import { ClassDiagramEditor } from "./components/class-diagram/ClassDiagramEditor.jsx";
 import { SequenceDiagramEditor } from "./components/sequence-diagram/SequenceDiagramEditor.jsx";
+import { ERDiagramEditor } from "./components/er-diagram/ERDiagramEditor.jsx";
 import { createEmptyAttribute } from "./components/class-diagram/factories.js";
 import { createEmptyMethod } from "./components/class-diagram/factories.js";
-import { diagramToJavaCode, javaCodeToDiagram, chatAboutDiagram, isApiKeyConfigured } from "./ai/openai.js";
+import { createEmptyTable, createEmptyERRelationship } from "./components/er-diagram/factories.js";
+import { diagramToJavaCode, javaCodeToDiagram, erDiagramToSQL, sqlToERDiagram, chatAboutDiagram, isApiKeyConfigured } from "./ai/openai.js";
 
 const INITIAL_STATE = {
   selected: "User",
@@ -76,6 +80,49 @@ const INITIAL_STATE = {
   sequence: {
     participants: [],
     messages: []
+  },
+  erSelected: "users",
+  er: {
+    tables: {
+      users: {
+        name: "users",
+        color: "#3b82f6",
+        columns: [
+          { id: crypto.randomUUID(), name: "id", dataType: "INT", isPrimaryKey: true, isForeignKey: false, isNullable: false, isUnique: true, defaultValue: "" },
+          { id: crypto.randomUUID(), name: "name", dataType: "VARCHAR(255)", isPrimaryKey: false, isForeignKey: false, isNullable: false, isUnique: false, defaultValue: "" },
+          { id: crypto.randomUUID(), name: "email", dataType: "VARCHAR(255)", isPrimaryKey: false, isForeignKey: false, isNullable: false, isUnique: true, defaultValue: "" },
+          { id: crypto.randomUUID(), name: "created_at", dataType: "TIMESTAMP", isPrimaryKey: false, isForeignKey: false, isNullable: false, isUnique: false, defaultValue: "NOW()" }
+        ]
+      },
+      orders: {
+        name: "orders",
+        color: "#8b5cf6",
+        columns: [
+          { id: crypto.randomUUID(), name: "id", dataType: "INT", isPrimaryKey: true, isForeignKey: false, isNullable: false, isUnique: true, defaultValue: "" },
+          { id: crypto.randomUUID(), name: "user_id", dataType: "INT", isPrimaryKey: false, isForeignKey: true, isNullable: false, isUnique: false, defaultValue: "" },
+          { id: crypto.randomUUID(), name: "total", dataType: "DECIMAL(10,2)", isPrimaryKey: false, isForeignKey: false, isNullable: false, isUnique: false, defaultValue: "0" },
+          { id: crypto.randomUUID(), name: "status", dataType: "VARCHAR(255)", isPrimaryKey: false, isForeignKey: false, isNullable: false, isUnique: false, defaultValue: "'pending'" }
+        ]
+      },
+      products: {
+        name: "products",
+        color: "#22c55e",
+        columns: [
+          { id: crypto.randomUUID(), name: "id", dataType: "INT", isPrimaryKey: true, isForeignKey: false, isNullable: false, isUnique: true, defaultValue: "" },
+          { id: crypto.randomUUID(), name: "title", dataType: "VARCHAR(255)", isPrimaryKey: false, isForeignKey: false, isNullable: false, isUnique: false, defaultValue: "" },
+          { id: crypto.randomUUID(), name: "price", dataType: "DECIMAL(10,2)", isPrimaryKey: false, isForeignKey: false, isNullable: false, isUnique: false, defaultValue: "0" },
+          { id: crypto.randomUUID(), name: "sku", dataType: "VARCHAR(255)", isPrimaryKey: false, isForeignKey: false, isNullable: true, isUnique: true, defaultValue: "" }
+        ]
+      }
+    },
+    relationships: [
+      { id: crypto.randomUUID(), sourceTable: "orders", sourceColumn: "user_id", targetTable: "users", targetColumn: "id", type: "many-to-one" }
+    ]
+  },
+  erLayout: {
+    users: { x: 100, y: 100 },
+    orders: { x: 460, y: 100 },
+    products: { x: 100, y: 380 }
   }
 };
 
@@ -89,6 +136,15 @@ function loadInitialState() {
       }
       if (stored.sequenceSelected === undefined) {
         stored.sequenceSelected = null;
+      }
+      if (!stored.er) {
+        stored.er = INITIAL_STATE.er;
+      }
+      if (!stored.erLayout) {
+        stored.erLayout = INITIAL_STATE.erLayout;
+      }
+      if (stored.erSelected === undefined) {
+        stored.erSelected = null;
       }
       return stored;
     }
@@ -104,6 +160,7 @@ export default function App() {
 
   const classRef = useRef(null);
   const seqRef = useRef(null);
+  const erRef = useRef(null);
   const fileInputRef = useRef(null);
 
   // Java export modal
@@ -117,6 +174,18 @@ export default function App() {
   const [javaImportCode, setJavaImportCode] = useState("");
   const [javaImportLoading, setJavaImportLoading] = useState(false);
   const [javaImportError, setJavaImportError] = useState(null);
+
+  // SQL export modal
+  const [showSQLExport, setShowSQLExport] = useState(false);
+  const [sqlExportCode, setSQLExportCode] = useState("");
+  const [sqlExportLoading, setSQLExportLoading] = useState(false);
+  const [sqlExportError, setSQLExportError] = useState(null);
+
+  // SQL import modal
+  const [showSQLImport, setShowSQLImport] = useState(false);
+  const [sqlImportCode, setSQLImportCode] = useState("");
+  const [sqlImportLoading, setSQLImportLoading] = useState(false);
+  const [sqlImportError, setSQLImportError] = useState(null);
 
   // Chat panel
   const [showChat, setShowChat] = useState(false);
@@ -231,6 +300,52 @@ export default function App() {
     });
   };
 
+  const addTable = () => {
+    setState((current) => {
+      const existingNames = Object.keys(current.er.tables);
+      let nextIndex = existingNames.length + 1;
+      let nextName = `table${nextIndex}`;
+      while (current.er.tables[nextName]) {
+        nextIndex += 1;
+        nextName = `table${nextIndex}`;
+      }
+      const colorIndex = existingNames.length % 8;
+      const colors = ["#3b82f6", "#8b5cf6", "#ec4899", "#f97316", "#22c55e", "#06b6d4", "#6366f1", "#eab308"];
+      const newTable = createEmptyTable(nextName, colors[colorIndex]);
+      return {
+        ...current,
+        erSelected: nextName,
+        er: {
+          ...current.er,
+          tables: { ...current.er.tables, [nextName]: newTable }
+        },
+        erLayout: {
+          ...current.erLayout,
+          [nextName]: {
+            x: Math.round((100 + (existingNames.length % 3) * 320) / 20) * 20,
+            y: Math.round((100 + Math.floor(existingNames.length / 3) * 280) / 20) * 20
+          }
+        }
+      };
+    });
+  };
+
+  const addERRelationship = () => {
+    setState((current) => {
+      const tableNames = Object.keys(current.er.tables);
+      if (tableNames.length < 2) return current;
+      const source = current.erSelected || tableNames[0];
+      const target = tableNames.find((n) => n !== source) || tableNames[0];
+      return {
+        ...current,
+        er: {
+          ...current.er,
+          relationships: [...current.er.relationships, createEmptyERRelationship(source, target)]
+        }
+      };
+    });
+  };
+
   const saveJson = () => {
     const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -252,12 +367,22 @@ export default function App() {
     if (parsed.sequenceSelected === undefined) {
       parsed.sequenceSelected = null;
     }
+    if (!parsed.er) {
+      parsed.er = INITIAL_STATE.er;
+    }
+    if (!parsed.erLayout) {
+      parsed.erLayout = INITIAL_STATE.erLayout;
+    }
+    if (parsed.erSelected === undefined) {
+      parsed.erSelected = null;
+    }
     setState(parsed);
     event.target.value = "";
   };
 
   const getActiveSvg = () => {
     if (activeTab === "sequence") return seqRef.current?.getSvgElement();
+    if (activeTab === "er") return erRef.current?.getSvgElement();
     return classRef.current?.getSvgElement();
   };
 
@@ -345,6 +470,51 @@ export default function App() {
     }
   };
 
+  const handleExportSQL = async () => {
+    if (!isApiKeyConfigured()) {
+      setSQLExportError("OpenAI API key not configured. Add VITE_OPENAI_API_KEY to your .env file.");
+      setShowSQLExport(true);
+      return;
+    }
+    setShowSQLExport(true);
+    setSQLExportCode("");
+    setSQLExportError(null);
+    setSQLExportLoading(true);
+    try {
+      const code = await erDiagramToSQL(state.er.tables, state.er.relationships);
+      setSQLExportCode(code);
+    } catch (err) {
+      setSQLExportError(err.message || "Failed to generate SQL.");
+    } finally {
+      setSQLExportLoading(false);
+    }
+  };
+
+  const handleImportSQL = async () => {
+    if (!isApiKeyConfigured()) {
+      setSQLImportError("OpenAI API key not configured. Add VITE_OPENAI_API_KEY to your .env file.");
+      return;
+    }
+    if (!sqlImportCode.trim()) return;
+    setSQLImportError(null);
+    setSQLImportLoading(true);
+    try {
+      const result = await sqlToERDiagram(sqlImportCode);
+      setState((current) => ({
+        ...current,
+        erSelected: Object.keys(result.tables)[0] ?? current.erSelected,
+        er: { tables: result.tables, relationships: result.relationships },
+        erLayout: result.erLayout,
+      }));
+      setShowSQLImport(false);
+      setSQLImportCode("");
+    } catch (err) {
+      setSQLImportError(err.message || "Failed to parse SQL.");
+    } finally {
+      setSQLImportLoading(false);
+    }
+  };
+
   const handleChatSend = async () => {
     if (!chatInput.trim() || chatLoading) return;
     if (!isApiKeyConfigured()) {
@@ -377,7 +547,14 @@ export default function App() {
             return updated;
           });
           if (chunk.diagramUpdate) {
-            if (chunk.diagramType === "sequence") {
+            if (chunk.diagramType === "er") {
+              setState((current) => ({
+                ...current,
+                erSelected: Object.keys(chunk.diagramUpdate.tables)[0] ?? current.erSelected,
+                er: { tables: chunk.diagramUpdate.tables, relationships: chunk.diagramUpdate.relationships },
+                erLayout: chunk.diagramUpdate.erLayout ?? current.erLayout,
+              }));
+            } else if (chunk.diagramType === "sequence") {
               setState((current) => ({
                 ...current,
                 sequence: chunk.diagramUpdate,
@@ -445,6 +622,7 @@ export default function App() {
               <TabsList>
                 <TabsTrigger value="class">UML Class Diagram</TabsTrigger>
                 <TabsTrigger value="sequence">Sequence Diagram</TabsTrigger>
+                <TabsTrigger value="er">ER Diagram</TabsTrigger>
               </TabsList>
 
               <div className="flex flex-wrap gap-2">
@@ -473,6 +651,16 @@ export default function App() {
                   </>
                 ) : null}
 
+                {/* ER diagram specific buttons */}
+                {activeTab === "er" ? (
+                  <>
+                    <ToolbarButton icon={Table2} onClick={addTable}>Add Table</ToolbarButton>
+                    <ToolbarButton icon={ArrowRightLeft} onClick={addERRelationship}>Add Relationship</ToolbarButton>
+                    <ToolbarButton icon={Database} onClick={handleExportSQL}>Export SQL</ToolbarButton>
+                    <ToolbarButton icon={FileCode} onClick={() => setShowSQLImport(true)}>Import SQL</ToolbarButton>
+                  </>
+                ) : null}
+
                 <ToolbarButton icon={MessageSquare} onClick={() => setShowChat((s) => !s)}>
                   {showChat ? "Close Chat" : "AI Chat"}
                 </ToolbarButton>
@@ -485,6 +673,9 @@ export default function App() {
             </TabsContent>
             <TabsContent value="sequence">
               <SequenceDiagramEditor ref={seqRef} state={state} setState={setState} />
+            </TabsContent>
+            <TabsContent value="er">
+              <ERDiagramEditor ref={erRef} state={state} setState={setState} />
             </TabsContent>
           </Tabs>
         </div>
@@ -507,6 +698,25 @@ export default function App() {
           error={javaImportError}
           onClose={() => { setShowJavaImport(false); setJavaImportError(null); }}
           onImport={handleImportJava}
+        />
+      ) : null}
+      {showSQLExport ? (
+        <SQLExportModal
+          code={sqlExportCode}
+          loading={sqlExportLoading}
+          error={sqlExportError}
+          onClose={() => setShowSQLExport(false)}
+          onCopy={copyToClipboard}
+        />
+      ) : null}
+      {showSQLImport ? (
+        <SQLImportModal
+          code={sqlImportCode}
+          onCodeChange={setSQLImportCode}
+          loading={sqlImportLoading}
+          error={sqlImportError}
+          onClose={() => { setShowSQLImport(false); setSQLImportError(null); }}
+          onImport={handleImportSQL}
         />
       ) : null}
       {showChat ? (
