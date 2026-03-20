@@ -1,4 +1,5 @@
-import { forwardRef, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { Maximize2, ZoomIn, ZoomOut } from "lucide-react";
 import { TABLE_WIDTH, GRID_SIZE, TABLE_COLORS } from "./constants.js";
 import { getTableHeight, getConnectionSides } from "./geometry.js";
 import { createEmptyColumn } from "./factories.js";
@@ -13,7 +14,58 @@ function snap(value) {
 
 export const ERDiagramEditor = forwardRef(function ERDiagramEditor({ state, setState }, ref) {
   const [dragging, setDragging] = useState(null);
+  const [panning, setPanning] = useState(null);
+  const [camera, setCamera] = useState({ x: 0, y: 0, zoom: 1 });
+  const [containerSize, setContainerSize] = useState({ width: 1200, height: 700 });
   const svgRef = useRef(null);
+  const cameraRef = useRef(camera);
+
+  useEffect(() => { cameraRef.current = camera; }, [camera]);
+
+  // Track SVG container size
+  useEffect(() => {
+    const el = svgRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      setContainerSize({ width: entry.contentRect.width, height: entry.contentRect.height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Wheel zoom centered on cursor
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const onWheel = (e) => {
+      e.preventDefault();
+      const cam = cameraRef.current;
+      const rect = svg.getBoundingClientRect();
+      const vb = svg.viewBox.baseVal;
+
+      const factor = e.deltaY > 0 ? 1 / 1.1 : 1.1;
+      const newZoom = Math.min(3.0, Math.max(0.25, cam.zoom * factor));
+
+      const mouseRatioX = (e.clientX - rect.left) / rect.width;
+      const mouseRatioY = (e.clientY - rect.top) / rect.height;
+      const cursorX = vb.x + mouseRatioX * vb.width;
+      const cursorY = vb.y + mouseRatioY * vb.height;
+
+      const newVW = rect.width / newZoom;
+      const newVH = rect.height / newZoom;
+
+      setCamera({
+        x: cursorX - mouseRatioX * newVW,
+        y: cursorY - mouseRatioY * newVH,
+        zoom: newZoom,
+      });
+    };
+    svg.addEventListener('wheel', onWheel, { passive: false });
+    return () => svg.removeEventListener('wheel', onWheel);
+  }, []);
+
+  const viewWidth = (containerSize.width || 1200) / camera.zoom;
+  const viewHeight = (containerSize.height || 700) / camera.zoom;
 
   useImperativeHandle(ref, () => ({
     getSvgElement: () => svgRef.current,
@@ -72,20 +124,6 @@ export const ERDiagramEditor = forwardRef(function ERDiagramEditor({ state, setS
     });
   }, [er.relationships, er.tables, erLayout, tableHeights]);
 
-  const canvasHeight = useMemo(() => {
-    const MIN_HEIGHT = 720;
-    const PADDING = 80;
-    let maxBottom = 0;
-    for (const name of tableNames) {
-      const pos = erLayout[name];
-      if (pos) {
-        const bottom = pos.y + (tableHeights[name] ?? 0);
-        if (bottom > maxBottom) maxBottom = bottom;
-      }
-    }
-    return Math.max(MIN_HEIGHT, maxBottom + PADDING);
-  }, [tableNames, erLayout, tableHeights]);
-
   const setSelected = (nextSelected) => {
     setState((current) => ({ ...current, erSelected: nextSelected }));
   };
@@ -116,7 +154,6 @@ export const ERDiagramEditor = forwardRef(function ERDiagramEditor({ state, setS
         nextTables[resolvedName] = { ...table, name: resolvedName };
       });
 
-      // Update relationships that reference the old name
       const nextRelationships = current.er.relationships.map((rel) => ({
         ...rel,
         sourceTable: rel.sourceTable === current.erSelected ? nextName : rel.sourceTable,
@@ -145,7 +182,6 @@ export const ERDiagramEditor = forwardRef(function ERDiagramEditor({ state, setS
       const nextLayout = { ...current.erLayout };
       delete nextLayout[name];
 
-      // Remove relationships referencing this table
       const nextRelationships = current.er.relationships.filter(
         (rel) => rel.sourceTable !== name && rel.targetTable !== name
       );
@@ -170,10 +206,10 @@ export const ERDiagramEditor = forwardRef(function ERDiagramEditor({ state, setS
     const svg = svgRef.current;
     if (!svg) return { x: 0, y: 0 };
     const rect = svg.getBoundingClientRect();
-    const viewBox = svg.viewBox.baseVal;
+    const vb = svg.viewBox.baseVal;
     return {
-      x: ((clientX - rect.left) / rect.width) * viewBox.width,
-      y: ((clientY - rect.top) / rect.height) * viewBox.height,
+      x: vb.x + ((clientX - rect.left) / rect.width) * vb.width,
+      y: vb.y + ((clientY - rect.top) / rect.height) * vb.height,
     };
   };
 
@@ -187,7 +223,26 @@ export const ERDiagramEditor = forwardRef(function ERDiagramEditor({ state, setS
     });
   };
 
+  const handlePanStart = (e) => {
+    if (e.button !== 0) return;
+    setPanning({
+      clientX: e.clientX,
+      clientY: e.clientY,
+      startX: camera.x,
+      startY: camera.y,
+    });
+    svgRef.current?.setPointerCapture(e.pointerId);
+  };
+
   const handlePointerMove = (event) => {
+    if (panning) {
+      const rect = svgRef.current.getBoundingClientRect();
+      const dx = (event.clientX - panning.clientX) * (viewWidth / rect.width);
+      const dy = (event.clientY - panning.clientY) * (viewHeight / rect.height);
+      setCamera(prev => ({ ...prev, x: panning.startX - dx, y: panning.startY - dy }));
+      return;
+    }
+
     if (!dragging) return;
     const pointer = getSvgPoint(event.clientX, event.clientY);
     setState((current) => ({
@@ -195,46 +250,149 @@ export const ERDiagramEditor = forwardRef(function ERDiagramEditor({ state, setS
       erLayout: {
         ...current.erLayout,
         [dragging.name]: {
-          x: Math.max(0, Math.min(snap(pointer.x - dragging.offsetX), 1080 - TABLE_WIDTH)),
-          y: Math.max(0, snap(pointer.y - dragging.offsetY)),
+          x: snap(pointer.x - dragging.offsetX),
+          y: snap(pointer.y - dragging.offsetY),
         }
       }
     }));
   };
 
-  const handlePointerUp = () => {
+  const handlePointerUp = (event) => {
+    if (panning) {
+      svgRef.current?.releasePointerCapture(event.pointerId);
+      setPanning(null);
+    }
     setDragging(null);
+  };
+
+  const handleZoomButton = (direction) => {
+    setCamera(prev => {
+      const oldVW = (containerSize.width || 1200) / prev.zoom;
+      const oldVH = (containerSize.height || 700) / prev.zoom;
+      const centerX = prev.x + oldVW / 2;
+      const centerY = prev.y + oldVH / 2;
+
+      const newZoom = Math.min(3.0, Math.max(0.25, +(prev.zoom + direction * 0.1).toFixed(2)));
+      const newVW = (containerSize.width || 1200) / newZoom;
+      const newVH = (containerSize.height || 700) / newZoom;
+
+      return { x: centerX - newVW / 2, y: centerY - newVH / 2, zoom: newZoom };
+    });
+  };
+
+  const fitAll = () => {
+    if (tableNames.length === 0) return;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const name of tableNames) {
+      const pos = erLayout[name];
+      if (!pos) continue;
+      minX = Math.min(minX, pos.x);
+      minY = Math.min(minY, pos.y);
+      maxX = Math.max(maxX, pos.x + TABLE_WIDTH);
+      maxY = Math.max(maxY, pos.y + (tableHeights[name] ?? 200));
+    }
+    const pad = 60;
+    const cw = containerSize.width || 1200;
+    const ch = containerSize.height || 700;
+    const contentW = maxX - minX + 2 * pad;
+    const contentH = maxY - minY + 2 * pad;
+    const newZoom = Math.min(3.0, Math.max(0.25, Math.min(cw / contentW, ch / contentH)));
+    const newVW = cw / newZoom;
+    const newVH = ch / newZoom;
+    setCamera({
+      x: (minX - pad) - (newVW - contentW) / 2,
+      y: (minY - pad) - (newVH - contentH) / 2,
+      zoom: newZoom,
+    });
   };
 
   return (
     <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_420px]">
-      <div className="rounded-3xl bg-white p-4 shadow-sm">
-        <svg
-          ref={svgRef}
-          viewBox={`0 0 1080 ${canvasHeight}`}
-          preserveAspectRatio="xMinYMin meet"
-          className="w-full touch-none rounded-2xl bg-[linear-gradient(to_right,#e2e8f0_1px,transparent_1px),linear-gradient(to_bottom,#e2e8f0_1px,transparent_1px)] bg-[size:20px_20px]"
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerLeave={handlePointerUp}
-        >
-          {preparedRelations.map((entry) => (
-            <ERRelationshipLine key={entry.key} {...entry} />
-          ))}
+      <div className="relative">
+        <div className="rounded-3xl bg-white p-4 shadow-sm overflow-hidden"
+             style={{ height: 'calc(100vh - 260px)', minHeight: '500px' }}>
+          <svg
+            ref={svgRef}
+            viewBox={`${camera.x} ${camera.y} ${viewWidth} ${viewHeight}`}
+            preserveAspectRatio="xMinYMin meet"
+            className="h-full w-full touch-none rounded-2xl"
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerLeave={handlePointerUp}
+          >
+            <defs>
+              <pattern id="er-grid-pattern" width={GRID_SIZE} height={GRID_SIZE} patternUnits="userSpaceOnUse">
+                <path d={`M ${GRID_SIZE} 0 L 0 0 0 ${GRID_SIZE}`} fill="none" stroke="#e2e8f0" strokeWidth="0.5" />
+              </pattern>
+            </defs>
 
-          {tableNames.map((name) => (
-            <TableCard
-              key={name}
-              table={er.tables[name]}
-              x={erLayout[name]?.x ?? 0}
-              y={erLayout[name]?.y ?? 0}
-              isSelected={erSelected === name}
-              onSelect={() => setSelected(name)}
-              onDelete={() => deleteTable(name)}
-              onPointerDown={(event) => startDrag(name, event)}
+            {/* White background + grid */}
+            <rect
+              x={camera.x - 2000}
+              y={camera.y - 2000}
+              width={viewWidth + 4000}
+              height={viewHeight + 4000}
+              fill="white"
             />
-          ))}
-        </svg>
+            <rect
+              x={camera.x - 2000}
+              y={camera.y - 2000}
+              width={viewWidth + 4000}
+              height={viewHeight + 4000}
+              fill="url(#er-grid-pattern)"
+              onPointerDown={handlePanStart}
+              style={{ cursor: panning ? 'grabbing' : 'grab' }}
+            />
+
+            {preparedRelations.map((entry) => (
+              <ERRelationshipLine key={entry.key} {...entry} />
+            ))}
+
+            {tableNames.map((name) => (
+              <TableCard
+                key={name}
+                table={er.tables[name]}
+                x={erLayout[name]?.x ?? 0}
+                y={erLayout[name]?.y ?? 0}
+                isSelected={erSelected === name}
+                onSelect={() => setSelected(name)}
+                onDelete={() => deleteTable(name)}
+                onPointerDown={(event) => startDrag(name, event)}
+              />
+            ))}
+          </svg>
+        </div>
+
+        {/* Zoom controls */}
+        <div className="absolute bottom-4 left-4 z-20 flex items-center gap-1 rounded-2xl bg-white px-2 py-1.5 shadow-lg border border-slate-200">
+          <button
+            type="button"
+            onClick={() => handleZoomButton(-1)}
+            disabled={camera.zoom <= 0.25}
+            className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <ZoomOut size={16} />
+          </button>
+          <span className="min-w-[3rem] text-center text-xs font-medium text-slate-600">
+            {Math.round(camera.zoom * 100)}%
+          </span>
+          <button
+            type="button"
+            onClick={() => handleZoomButton(1)}
+            disabled={camera.zoom >= 3.0}
+            className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <ZoomIn size={16} />
+          </button>
+          <button
+            type="button"
+            onClick={fitAll}
+            className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+            title="Fit all"
+          >
+            <Maximize2 size={16} />
+          </button>
+        </div>
       </div>
 
       <div className="rounded-3xl bg-white p-6 shadow-sm">

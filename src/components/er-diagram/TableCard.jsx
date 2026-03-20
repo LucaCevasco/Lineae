@@ -13,7 +13,7 @@ export function TableCard({ table, x, y, isSelected, onSelect, onDelete, onPoint
       onClick={onSelect}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      onPointerDown={onPointerDown}
+      onPointerDown={(e) => { e.stopPropagation(); onPointerDown(e); }}
       role="button"
       tabIndex={0}
       className="cursor-grab active:cursor-grabbing"
