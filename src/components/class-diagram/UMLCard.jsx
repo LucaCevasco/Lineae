@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { CARD_WIDTH, HEADER_HEIGHT, LINE_HEIGHT, PADDING_TOP, SECTION_GAP } from "./constants.js";
-import { getClassHeight } from "./geometry.js";
+import { getClassHeight, getAttributeDisplayText, getMethodDisplayText, wrapText, getAttrLineCount } from "./geometry.js";
 
 export function UMLCard({ item, isSelected, onSelect, onDelete, onPointerDown, x, y }) {
   const [isHovered, setIsHovered] = useState(false);
@@ -9,7 +9,24 @@ export function UMLCard({ item, isSelected, onSelect, onDelete, onPointerDown, x
   const titleClass = item.isAbstract || item.stereotype === "abstract" ? "italic" : "";
   const headerY = PADDING_TOP + 12;
   const attributeY = HEADER_HEIGHT;
-  const methodY = HEADER_HEIGHT + Math.max(1, item.attributes.length) * LINE_HEIGHT + SECTION_GAP;
+  const methodY = HEADER_HEIGHT + getAttrLineCount(item) * LINE_HEIGHT + SECTION_GAP;
+
+  // Pre-compute wrapped lines with y positions
+  const attrEntries = [];
+  let curY = attributeY + 18;
+  for (const attr of item.attributes) {
+    const lines = wrapText(getAttributeDisplayText(attr));
+    attrEntries.push({ id: attr.id, lines, y: curY });
+    curY += lines.length * LINE_HEIGHT;
+  }
+
+  const methodEntries = [];
+  let mY = methodY + 8;
+  for (const method of item.methods) {
+    const lines = wrapText(getMethodDisplayText(method));
+    methodEntries.push({ id: method.id, lines, y: mY });
+    mY += lines.length * LINE_HEIGHT;
+  }
 
   return (
     <g
@@ -71,9 +88,11 @@ export function UMLCard({ item, isSelected, onSelect, onDelete, onPointerDown, x
           No attributes
         </text>
       ) : (
-        item.attributes.map((attribute, index) => (
-          <text key={attribute.id} x={12} y={attributeY + 18 + index * LINE_HEIGHT} className="fill-slate-700 text-[11px]">
-            {`${attribute.visibility}${attribute.name}: ${attribute.type}${attribute.defaultValue ? ` = ${attribute.defaultValue}` : ""}${attribute.isStatic ? " {static}" : ""}${attribute.isAbstract ? " {abstract}" : ""}`}
+        attrEntries.map((entry) => (
+          <text key={entry.id} x={12} y={entry.y} className="fill-slate-700 text-[11px]">
+            {entry.lines.map((line, i) => (
+              <tspan key={i} x={12} dy={i === 0 ? 0 : LINE_HEIGHT}>{line}</tspan>
+            ))}
           </text>
         ))
       )}
@@ -83,9 +102,11 @@ export function UMLCard({ item, isSelected, onSelect, onDelete, onPointerDown, x
           No methods
         </text>
       ) : (
-        item.methods.map((method, index) => (
-          <text key={method.id} x={12} y={methodY + 8 + index * LINE_HEIGHT} className="fill-slate-700 text-[11px]">
-            {`${method.visibility}${method.name}(${method.parameters.map((parameter) => `${parameter.name}: ${parameter.type}`).join(", ")}): ${method.returnType}${method.isStatic ? " {static}" : ""}${method.isAbstract ? " {abstract}" : ""}`}
+        methodEntries.map((entry) => (
+          <text key={entry.id} x={12} y={entry.y} className="fill-slate-700 text-[11px]">
+            {entry.lines.map((line, i) => (
+              <tspan key={i} x={12} dy={i === 0 ? 0 : LINE_HEIGHT}>{line}</tspan>
+            ))}
           </text>
         ))
       )}

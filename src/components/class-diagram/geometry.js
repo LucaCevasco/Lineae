@@ -1,5 +1,37 @@
 import { CARD_WIDTH, HEADER_HEIGHT, LINE_HEIGHT, SECTION_GAP, PADDING_TOP, PADDING_BOTTOM } from "./constants.js";
 
+const TEXT_PADDING = 24; // 12px each side
+const MAX_CHARS_PER_LINE = Math.floor((CARD_WIDTH - TEXT_PADDING) / 6.2);
+
+export function wrapText(text) {
+  if (text.length <= MAX_CHARS_PER_LINE) return [text];
+  const lines = [];
+  let remaining = text;
+  while (remaining.length > MAX_CHARS_PER_LINE) {
+    let breakAt = -1;
+    for (let i = MAX_CHARS_PER_LINE; i > 0; i--) {
+      if (remaining[i] === ' ' || remaining[i] === ',') {
+        breakAt = remaining[i] === ',' ? i + 1 : i;
+        break;
+      }
+    }
+    if (breakAt <= 0) breakAt = MAX_CHARS_PER_LINE;
+    lines.push(remaining.substring(0, breakAt).trimEnd());
+    remaining = remaining.substring(breakAt).trimStart();
+  }
+  if (remaining) lines.push(remaining);
+  return lines;
+}
+
+export function getAttributeDisplayText(attr) {
+  return `${attr.visibility}${attr.name}: ${attr.type}${attr.defaultValue ? ` = ${attr.defaultValue}` : ""}${attr.isStatic ? " {static}" : ""}${attr.isAbstract ? " {abstract}" : ""}`;
+}
+
+export function getMethodDisplayText(method) {
+  const params = method.parameters.map(p => `${p.name}: ${p.type}`).join(", ");
+  return `${method.visibility}${method.name}(${params}): ${method.returnType}${method.isStatic ? " {static}" : ""}${method.isAbstract ? " {abstract}" : ""}`;
+}
+
 export function formatAttribute(attribute) {
   const base = `${attribute.visibility}${attribute.name || "attribute"}: ${attribute.type || "any"}`;
   const withDefault = attribute.defaultValue ? `${base} = ${attribute.defaultValue}` : base;
@@ -16,12 +48,22 @@ export function formatMethod(method) {
   return method.isAbstract ? `/${wrappedStatic}/` : wrappedStatic;
 }
 
+export function getAttrLineCount(umlClass) {
+  if (umlClass.attributes.length === 0) return 1;
+  return umlClass.attributes.reduce((sum, attr) => sum + wrapText(getAttributeDisplayText(attr)).length, 0);
+}
+
+export function getMethodLineCount(umlClass) {
+  if (umlClass.methods.length === 0) return 1;
+  return umlClass.methods.reduce((sum, m) => sum + wrapText(getMethodDisplayText(m)).length, 0);
+}
+
 export function getClassHeight(umlClass) {
   const stereotypeLines = umlClass.stereotype && umlClass.stereotype !== "none" ? 1 : 0;
   const titleLines = stereotypeLines + 1;
   const header = PADDING_TOP + titleLines * LINE_HEIGHT + 14;
-  const attributeSection = Math.max(1, umlClass.attributes.length) * LINE_HEIGHT + SECTION_GAP;
-  const methodSection = Math.max(1, umlClass.methods.length) * LINE_HEIGHT + PADDING_BOTTOM;
+  const attributeSection = getAttrLineCount(umlClass) * LINE_HEIGHT + SECTION_GAP;
+  const methodSection = getMethodLineCount(umlClass) * LINE_HEIGHT + PADDING_BOTTOM;
   return Math.max(160, header + attributeSection + methodSection);
 }
 
